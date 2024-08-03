@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <ctime>
 
 using namespace std;
 
@@ -14,6 +15,9 @@ struct Book
     string genre;
     string category;
     bool borrowed;
+    bool reserved;
+    string reservedBy;
+    time_t dueDate;
 };
 
 struct User
@@ -56,10 +60,23 @@ private:
         return result;
     }
 
+    vector<Book> findBooksByGenre(const string &genre) const
+    {
+        vector<Book> result;
+        for (const auto &book : books)
+        {
+            if (book.genre == genre)
+            {
+                result.push_back(book);
+            }
+        }
+        return result;
+    }
+
 public:
     void addBook(const string &title, const string &author, const string &isbn, int publicationYear, const string &genre, const string &category)
     {
-        Book newBook{title, author, isbn, publicationYear, genre, category, false};
+        Book newBook{title, author, isbn, publicationYear, genre, category, false, false, "", 0};
         books.push_back(newBook);
     }
 
@@ -75,7 +92,8 @@ public:
             cout << "Title: " << book.title << ", Author: " << book.author
                  << ", ISBN: " << book.isbn << ", Year: " << book.publicationYear
                  << ", Genre: " << book.genre << ", Category: " << book.category
-                 << ", Status: " << (book.borrowed ? "Borrowed" : "Available") << endl;
+                 << ", Status: " << (book.borrowed ? "Borrowed" : (book.reserved ? "Reserved" : "Available"))
+                 << (book.dueDate ? ", Due Date: " + to_string(book.dueDate) : "") << endl;
         }
     }
 
@@ -89,7 +107,8 @@ public:
                 cout << "Title: " << book.title << ", Author: " << book.author
                      << ", ISBN: " << book.isbn << ", Year: " << book.publicationYear
                      << ", Genre: " << book.genre << ", Category: " << book.category
-                     << ", Status: " << (book.borrowed ? "Borrowed" : "Available") << endl;
+                     << ", Status: " << (book.borrowed ? "Borrowed" : (book.reserved ? "Reserved" : "Available"))
+                     << (book.dueDate ? ", Due Date: " + to_string(book.dueDate) : "") << endl;
                 found = true;
             }
         }
@@ -111,17 +130,65 @@ public:
         {
             cout << "Title: " << book.title << ", Author: " << book.author
                  << ", ISBN: " << book.isbn << ", Year: " << book.publicationYear
-                 << ", Genre: " << book.genre << ", Status: " << (book.borrowed ? "Borrowed" : "Available") << endl;
+                 << ", Genre: " << book.genre << ", Status: " << (book.borrowed ? "Borrowed" : (book.reserved ? "Reserved" : "Available"))
+                 << (book.dueDate ? ", Due Date: " + to_string(book.dueDate) : "") << endl;
         }
     }
 
-    void deleteBook(const string &title)
+    void searchBookByGenre(const string &genre) const
+    {
+        vector<Book> booksInGenre = findBooksByGenre(genre);
+        if (booksInGenre.empty())
+        {
+            cout << "No books found in genre: " << genre << endl;
+            return;
+        }
+        for (const auto &book : booksInGenre)
+        {
+            cout << "Title: " << book.title << ", Author: " << book.author
+                 << ", ISBN: " << book.isbn << ", Year: " << book.publicationYear
+                 << ", Genre: " << book.genre << ", Status: " << (book.borrowed ? "Borrowed" : (book.reserved ? "Reserved" : "Available"))
+                 << (book.dueDate ? ", Due Date: " + to_string(book.dueDate) : "") << endl;
+        }
+    }
+
+    void reserveBook(const string &title)
     {
         int index = findBookIndexByTitle(title);
         if (index != -1)
         {
-            books.erase(books.begin() + index);
-            cout << "Book deleted successfully." << endl;
+            if (!books[index].reserved && !books[index].borrowed)
+            {
+                books[index].reserved = true;
+                books[index].reservedBy = currentUser;
+                cout << "Book reserved successfully." << endl;
+            }
+            else
+            {
+                cout << "Book is already reserved or borrowed." << endl;
+            }
+        }
+        else
+        {
+            cout << "No book found with the title: " << title << endl;
+        }
+    }
+
+    void cancelReservation(const string &title)
+    {
+        int index = findBookIndexByTitle(title);
+        if (index != -1)
+        {
+            if (books[index].reserved && books[index].reservedBy == currentUser)
+            {
+                books[index].reserved = false;
+                books[index].reservedBy = "";
+                cout << "Reservation canceled successfully." << endl;
+            }
+            else
+            {
+                cout << "Book is not reserved by you or not reserved at all." << endl;
+            }
         }
         else
         {
@@ -134,10 +201,15 @@ public:
         int index = findBookIndexByTitle(title);
         if (index != -1)
         {
-            if (!books[index].borrowed)
+            if (!books[index].borrowed && !books[index].reserved)
             {
                 books[index].borrowed = true;
+                books[index].dueDate = time(nullptr) + 30 * 24 * 60 * 60; // 30 days from now
                 cout << "You have borrowed: " << title << endl;
+            }
+            else if (books[index].reserved)
+            {
+                cout << "Book is reserved by another user." << endl;
             }
             else
             {
@@ -158,7 +230,14 @@ public:
             if (books[index].borrowed)
             {
                 books[index].borrowed = false;
+                books[index].dueDate = 0;
                 cout << "You have returned: " << title << endl;
+                if (books[index].reserved && books[index].reservedBy == currentUser)
+                {
+                    books[index].reserved = false;
+                    books[index].reservedBy = "";
+                    cout << "Reservation for this book has been canceled." << endl;
+                }
             }
             else
             {
@@ -171,49 +250,80 @@ public:
         }
     }
 
-    void registerUser(const string &username, const string &password, const string &fullName, const string &email)
+    void generateOverdueReport() const
     {
-        if (users.find(username) != users.end())
+        time_t now = time(nullptr);
+        bool found = false;
+        for (const auto &book : books)
         {
-            cout << "User already exists." << endl;
+            if (book.borrowed && book.dueDate < now)
+            {
+                cout << "Title: " << book.title << ", Due Date: " << book.dueDate << endl;
+                found = true;
+            }
         }
-        else
+        if (!found)
         {
-            users[username] = User{username, password, fullName, email};
-            cout << "User registered successfully." << endl;
+            cout << "No overdue books." << endl;
         }
     }
 
-    bool loginUser(const string &username, const string &password)
+    void generateBooksByGenreReport() const
     {
-        auto it = users.find(username);
-        if (it != users.end() && it->second.password == password)
+        unordered_map<string, int> genreCount;
+        for (const auto &book : books)
+        {
+            genreCount[book.genre]++;
+        }
+        for (const auto &[genre, count] : genreCount)
+        {
+            cout << "Genre: " << genre << ", Number of Books: " << count << endl;
+        }
+    }
+
+    void loginUser(const string &username, const string &password)
+    {
+        if (users.find(username) != users.end() && users[username].password == password)
         {
             currentUser = username;
-            return true;
+            cout << "Login successful." << endl;
         }
-        return false;
+        else
+        {
+            cout << "Invalid username or password." << endl;
+        }
     }
 
     void logoutUser()
     {
-        currentUser.clear();
-        cout << "Logged out successfully." << endl;
+        if (!currentUser.empty())
+        {
+            currentUser.clear();
+            cout << "Logged out successfully." << endl;
+        }
+        else
+        {
+            cout << "No user is logged in." << endl;
+        }
     }
 
-    bool isLoggedIn() const
+    void registerUser(const string &username, const string &password, const string &fullName, const string &email)
     {
-        return !currentUser.empty();
-    }
-
-    string getCurrentUser() const
-    {
-        return currentUser;
+        if (users.find(username) == users.end())
+        {
+            User newUser{username, password, fullName, email};
+            users[username] = newUser;
+            cout << "User registered successfully." << endl;
+        }
+        else
+        {
+            cout << "Username already exists." << endl;
+        }
     }
 
     void updateUserProfile(const string &fullName, const string &email)
     {
-        if (users.find(currentUser) != users.end())
+        if (!currentUser.empty())
         {
             users[currentUser].fullName = fullName;
             users[currentUser].email = email;
@@ -221,38 +331,40 @@ public:
         }
         else
         {
-            cout << "User not logged in." << endl;
+            cout << "Please login first." << endl;
         }
     }
-};
 
-void showMenu()
-{
-    cout << "Library Management System" << endl;
-    cout << "1. Register User" << endl;
-    cout << "2. Login" << endl;
-    cout << "3. Add Book" << endl;
-    cout << "4. List Books" << endl;
-    cout << "5. Search Book" << endl;
-    cout << "6. Search Book by Category" << endl;
-    cout << "7. Borrow Book" << endl;
-    cout << "8. Return Book" << endl;
-    cout << "9. Delete Book" << endl;
-    cout << "10. Update Profile" << endl;
-    cout << "11. Logout" << endl;
-    cout << "12. Exit" << endl;
-}
+    bool isLoggedIn() const
+    {
+        return !currentUser.empty();
+    }
+};
 
 int main()
 {
     Library library;
     int choice;
-    string title, author, isbn, genre, category, username, password, fullName, email;
-    int publicationYear;
+    string title, author, isbn, genre, category, fullName, email, username, password;
 
     while (true)
     {
-        showMenu();
+        cout << "1. Add Book" << endl;
+        cout << "2. List Books" << endl;
+        cout << "3. Search Book" << endl;
+        cout << "4. Search Book by Category" << endl;
+        cout << "5. Search Book by Genre" << endl;
+        cout << "6. Reserve Book" << endl;
+        cout << "7. Cancel Reservation" << endl;
+        cout << "8. Borrow Book" << endl;
+        cout << "9. Return Book" << endl;
+        cout << "10. Generate Overdue Report" << endl;
+        cout << "11. Generate Books by Genre Report" << endl;
+        cout << "12. Login" << endl;
+        cout << "13. Logout" << endl;
+        cout << "14. Update Profile" << endl;
+        cout << "15. Register User" << endl;
+        cout << "16. Exit" << endl;
         cout << "Enter your choice: ";
         cin >> choice;
         cin.ignore();
@@ -260,67 +372,65 @@ int main()
         switch (choice)
         {
         case 1:
-            cout << "Enter username: ";
-            getline(cin, username);
-            cout << "Enter password: ";
-            getline(cin, password);
-            cout << "Enter full name: ";
-            getline(cin, fullName);
-            cout << "Enter email: ";
-            getline(cin, email);
-            library.registerUser(username, password, fullName, email);
+            cout << "Enter book title: ";
+            getline(cin, title);
+            cout << "Enter author: ";
+            getline(cin, author);
+            cout << "Enter ISBN: ";
+            getline(cin, isbn);
+            cout << "Enter publication year: ";
+            int year;
+            cin >> year;
+            cin.ignore();
+            cout << "Enter genre: ";
+            getline(cin, genre);
+            cout << "Enter category: ";
+            getline(cin, category);
+            library.addBook(title, author, isbn, year, genre, category);
             break;
         case 2:
-            cout << "Enter username: ";
-            getline(cin, username);
-            cout << "Enter password: ";
-            getline(cin, password);
-            if (library.loginUser(username, password))
-            {
-                cout << "Logged in successfully." << endl;
-            }
-            else
-            {
-                cout << "Invalid username or password." << endl;
-            }
+            library.listBooks();
             break;
         case 3:
+            cout << "Enter search query: ";
+            getline(cin, title);
+            library.searchBook(title);
+            break;
+        case 4:
+            cout << "Enter category: ";
+            getline(cin, category);
+            library.searchBookByCategory(category);
+            break;
+        case 5:
+            cout << "Enter genre: ";
+            getline(cin, genre);
+            library.searchBookByGenre(genre);
+            break;
+        case 6:
             if (library.isLoggedIn())
             {
-                cout << "Enter book title: ";
+                cout << "Enter book title to reserve: ";
                 getline(cin, title);
-                cout << "Enter book author: ";
-                getline(cin, author);
-                cout << "Enter book ISBN: ";
-                getline(cin, isbn);
-                cout << "Enter publication year: ";
-                cin >> publicationYear;
-                cin.ignore();
-                cout << "Enter book genre: ";
-                getline(cin, genre);
-                cout << "Enter book category: ";
-                getline(cin, category);
-                library.addBook(title, author, isbn, publicationYear, genre, category);
+                library.reserveBook(title);
             }
             else
             {
                 cout << "Please login first." << endl;
             }
             break;
-        case 4:
-            library.listBooks();
-            break;
-        case 5:
-            cout << "Enter search query: ";
-            getline(cin, title);
-            library.searchBook(title);
-            break;
-        case 6:
-            cout << "Enter category: ";
-            getline(cin, category);
-            library.searchBookByCategory(category);
-            break;
         case 7:
+            if (library.isLoggedIn())
+            {
+                cout << "Enter book title to cancel reservation: ";
+                getline(cin, title);
+                library.cancelReservation(title);
+            }
+            else
+            {
+                cout << "Please login first." << endl;
+            }
+            break;
+        case 8:
             if (library.isLoggedIn())
             {
                 cout << "Enter book title to borrow: ";
@@ -332,7 +442,7 @@ int main()
                 cout << "Please login first." << endl;
             }
             break;
-        case 8:
+        case 9:
             if (library.isLoggedIn())
             {
                 cout << "Enter book title to return: ";
@@ -344,19 +454,23 @@ int main()
                 cout << "Please login first." << endl;
             }
             break;
-        case 9:
-            if (library.isLoggedIn())
-            {
-                cout << "Enter book title to delete: ";
-                getline(cin, title);
-                library.deleteBook(title);
-            }
-            else
-            {
-                cout << "Please login first." << endl;
-            }
-            break;
         case 10:
+            library.generateOverdueReport();
+            break;
+        case 11:
+            library.generateBooksByGenreReport();
+            break;
+        case 12:
+            cout << "Enter username: ";
+            getline(cin, username);
+            cout << "Enter password: ";
+            getline(cin, password);
+            library.loginUser(username, password);
+            break;
+        case 13:
+            library.logoutUser();
+            break;
+        case 14:
             if (library.isLoggedIn())
             {
                 cout << "Enter new full name: ";
@@ -370,10 +484,18 @@ int main()
                 cout << "Please login first." << endl;
             }
             break;
-        case 11:
-            library.logoutUser();
+        case 15:
+            cout << "Enter username: ";
+            getline(cin, username);
+            cout << "Enter password: ";
+            getline(cin, password);
+            cout << "Enter full name: ";
+            getline(cin, fullName);
+            cout << "Enter email: ";
+            getline(cin, email);
+            library.registerUser(username, password, fullName, email);
             break;
-        case 12:
+        case 16:
             cout << "Exiting..." << endl;
             return 0;
         default:
